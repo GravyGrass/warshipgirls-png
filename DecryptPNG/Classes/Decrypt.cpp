@@ -4,6 +4,7 @@
 #include "Files.h"
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #pragma comment(lib, "ws2_32.lib")
 
 
@@ -22,19 +23,20 @@ void DecryptPNG(const std::vector<std::string> &filelist, const aes_key &key)
 		// 读取数据块位置
 		uint32_t end_pos = (uint32_t)in_file.tellg();
 		in_file.seekg(end_pos - sizeof(uint32_t));
-		uint32_t block_start_pos = ntohl(*reinterpret_cast<uint32_t *>(&(ReadSome<sizeof(uint32_t)>(in_file)[0])));
+		uint32_t block_start_pos = ntohl(ReadObject<uint32_t>(in_file));
 		in_file.seekg(block_start_pos);
 
 		// 获取数据块大小
-		const uint32_t block_size = ntohl(*reinterpret_cast<uint32_t *>(&ReadSome<sizeof(uint32_t)>(in_file)[0]));
+		const uint32_t block_size = ntohl(ReadObject<uint32_t>(in_file));
 		
 		// 解密数据块信息
-		auto block_info = ReadLarge(in_file, uint32_t(end_pos - block_start_pos - sizeof(uint32_t) * 2));
-		DecryptBlock(block_info, key);
+		auto block_info_buffer = ReadLarge(in_file, uint32_t(end_pos - block_start_pos - sizeof(uint32_t) * 2));
+		DecryptBlock(block_info_buffer, key);
+		std::istringstream block_info(std::string(block_info_buffer.cbegin(), block_info_buffer.cend()));
 
 		// 验证校验和
 		block_info.seekg(block_size);
-		uint32_t crc32 = ntohl(*reinterpret_cast<uint32_t *>(&ReadSome<sizeof(uint32_t)>(block_info)[0]));
+		uint32_t crc32 = ntohl(ReadObject<uint32_t>(block_info));
 		if (crc32 != CRC32(block_info.str().substr(0, block_size)))
 		{
 			std::cerr << "校验和验证失败！" << std::endl;
@@ -66,8 +68,7 @@ void DecryptPNG(const std::vector<std::string> &filelist, const aes_key &key)
 			}
 
 			// 读取数据块信息
-			Block block;
-			memcpy(&block, &ReadSome<sizeof(Block)>(block_info)[0], sizeof(Block));
+			Block block = ReadObject<Block>(block_info);
 
 			// 写入数据块长度
 			SteamCopy(out_file, &block.size, sizeof(block.size));
@@ -84,9 +85,9 @@ void DecryptPNG(const std::vector<std::string> &filelist, const aes_key &key)
 			if (strcmp(s_name.c_str(), "IHDR") == 0)
 			{
 				IHDRBlock ihdr;
-				memcpy(&ihdr, &block, sizeof(Block));
-				memcpy(((char *)&ihdr) + sizeof(Block), &ReadSome<sizeof(IHDRBlock) - sizeof(Block)>(block_info)[0], sizeof(IHDRBlock) - sizeof(Block));
-				SteamCopy(out_file, ihdr.data, sizeof(ihdr.data));
+				ihdr.block = block;
+				ihdr.data = ReadObject<decltype(ihdr.data)>(block_info);
+				SteamCopy(out_file, ihdr.data.data(), ihdr.data.size());
 			}
 			else if (strcmp(s_name.c_str(), "IEND") == 0)
 			{

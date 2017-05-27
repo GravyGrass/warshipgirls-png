@@ -22,7 +22,7 @@ struct Block
 struct IHDRBlock
 {
 	Block block;
-	char data[13 + CRC_SIZE];
+	std::array<char, 13 + CRC_SIZE> data;
 };
 
 #pragma pack(pop)
